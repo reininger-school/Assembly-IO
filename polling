@@ -1,0 +1,193 @@
+#MIPS program for single digit adder with memory mapped I/O polling
+.globl main
+.data
+	exp: .space 30 #reserve space for 4 characters(bytes)
+	#addresses
+	RC: .word 0xFFFF0000
+	RD: .word 0xFFFF0004
+	TC: .word 0xFFFF0008
+	TD: .word 0xFFFF000C
+
+.text
+main:
+	#turn on transmitter ready bit
+	jal transmitterOn
+	
+	#poll for expression
+	jal pollExp
+		
+	#calculate result
+	jal calculateResult
+	
+	#print to screen by polling
+	jal printExp
+				
+	#terminate
+	j terminate
+	
+	
+	
+#no args, no return
+transmitterOn:
+	lw $t0, TC #$t0 contains TC addr
+	lw $t1, 0($t0) #t1 contains TC
+	ori $t2, $t1, 1 #t2 contains TC with ready enabled
+	sw $t2, 0($t0) #store new TC
+	jr $ra
+	
+#no args, no return
+terminate:
+	li $v0, 10
+	syscall
+	
+#no args, does return
+pollRC:
+	lw $t0, RC #$t0 contains RC addr
+	Loop:
+		lw $t1, 0($t0) #$t1 contains RC 
+		andi $t2, $t1, 0x0001 #$t2 contains RC ready bit
+		beq $t2, $zero, Loop #continue polling if not ready
+	lw $v0, 4($t0) #load reciever data into $v0
+	jr $ra
+	
+#no args, no return
+pollExp:
+	#save to stack
+	addi $sp, $sp, -16
+	sw $s0, 0($sp)
+	sw $s1, 4($sp)
+	sw $s2, 8($sp)
+	sw $ra, 12($sp)
+	
+	#poll for 4 keystokes
+	li $s0, 0 #set counter to 0
+	li $s1, 4 #set n
+	la $s2, exp #sw addr
+	Loop1:
+		bge $s0, $s1, Exit1
+		addi $s0, $s0, 1
+		jal pollRC
+		sw $v0, 0($s2)
+		move $a0, $v0 #store read in char in $a0 to print
+		jal pollPrint
+		addi $s2, $s2, 4
+		j Loop1
+	Exit1:
+	
+	
+	
+	#recover from stack
+	lw $ra, 12($sp)
+	lw $s2, 8($sp)
+	lw $s1, 4($sp)
+	lw $s0, 0($sp)
+	addi $sp, $sp, 16
+	
+	jr $ra
+
+#no args, does return
+calculateResult:
+#convention:
+#$s1 = firstnum
+#s2 = secondnum
+#s3 = addr of exp
+#$s4 = result
+
+	#store to stack
+	addi $sp, $sp, -20
+	sw $ra, 0($sp)
+	sw $s1, 4($sp)
+	sw $s2, 8($sp)
+	sw $s3, 12($sp)
+	sw $s4, 16($sp)
+	
+	#calculate result
+	la $s3, exp
+	lw $a0, 0($s3) 
+	jal char2num
+	move $s1, $v0
+	lw $a0, 8($s3)
+	jal char2num
+	move $s2, $v0
+	add $s4, $s1, $s2
+	
+	#if2
+	ble $s4, 9, else2
+	#if 2 digits
+	addi $s4, $s4, -10
+	move $a0, $s4
+	jal num2char
+	sw $v0, 20($s3)
+	li $s0, 49
+	sw $s0, 16($s3)
+	j exit2
+	
+	else2:
+	#if 1 digit
+	move $a0, $s4
+	jal num2char
+	sw $v0, 16($s3)
+	exit2:
+	
+	
+	#recover
+	lw $s4, 16($sp)
+	lw $s3, 12($sp)
+	lw $s2, 8($sp)
+	lw $s1, 4($sp)
+	lw $ra, 0($sp)
+	addi $sp, $sp, 20
+	
+	jr $ra
+
+#takes word with char as argument
+pollPrint:
+	lui $t0, 0xFFFF #$t0 has tc addr
+	Loop3:
+		lw $t1, 8($t0) #$t1 holds TC
+		andi $t2, $t1, 0x0001 #$t2 hold TC ready bit
+		beq $t2, $zero, Loop3 #keep polling if ready is 0
+		sw $a0, 12($t0) #store char to be written
+	jr $ra
+	
+printExp:
+	#save to stack
+	addi $sp, $sp, -16
+	sw $ra, 0($sp)
+	sw $s0, 4($sp)
+	sw $s1, 8($sp)
+	sw $s2, 12($sp)
+	
+	#poll for 6 chars
+	li $s0, 4 #set counter to 0
+	li $s1, 6 #set n
+	la $s2, exp #lw addr
+	addi $s2, $s2, 16
+	Loop5:
+		bge $s0, $s1, Exit5
+		addi $s0, $s0, 1
+		lw $a0, 0($s2)
+		jal pollPrint
+		addi $s2, $s2, 4
+		j Loop5
+	Exit5:
+	
+	#recover stack
+	lw $s2, 12($sp)
+	lw $s1, 8($sp)
+	lw $s0, 4($sp)
+	lw $ra, 0($sp)
+	addi $sp, $sp, 16
+		
+	jr $ra
+
+char2num:
+	li $t0, 48
+	subu $v0, $a0, $t0
+	jr $ra
+	
+num2char:
+	li $t0, 48
+	addu $v0, $a0, $t0
+	jr $ra
+	
